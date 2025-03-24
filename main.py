@@ -422,7 +422,7 @@ class TulipBot:
 
 
 if __name__ == "__main__":
-    TELEGRAM_TOKEN = "INSERT_YOUR_TELEGRAM_TOKEN"
+    TELEGRAM_TOKEN = os.getenv("TG_TOKEN", "INSERT_YOUR_TELEGRAM_TOKEN")
 
     if not TELEGRAM_TOKEN:
         logger.error("Не указан обязательный параметр TELEGRAM_TOKEN.")
