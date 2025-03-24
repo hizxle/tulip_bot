@@ -5,6 +5,8 @@ import json
 import requests
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from difflib import SequenceMatcher
+import math
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes, \
@@ -17,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Константы для конечного автомата
-MAIN, INITIAL_QUESTIONS, ASSESSMENT = range(3)
+MAIN, INITIAL_QUESTIONS, ASSESSMENT, STATION = range(4)
 GENDER, AGE, FAMILY_HISTORY, SMOKING, DIET, PHYSICAL_ACTIVITY = range(6)
 
 # Системный промпт для модели
@@ -63,6 +65,13 @@ class TulipBot:
         self.api_url = "http://localhost:5000/mock_api"
         self.user_data = {}  # Хранение контекста беседы с пользователями
 
+        r_subway = requests.get("https://api.hh.ru/metro/1")
+        lines = r_subway.json()["lines"]
+        self.cached_subway_stations = [station for line in lines for station in line["stations"]] # Станции метро
+
+        r_clinics = requests.get("https://www.mos.ru/aisearch/facility/clinics/v1/search/?type=36&group_size=7777")
+        self.cached_clinics = r_clinics.json()["facility"]["data"]
+
     def _prepare_prompt(self, user_id: int, message: str) -> dict:
         """Подготовка промпта с учетом контекста пользователя"""
         if user_id not in self.user_data:
@@ -99,6 +108,24 @@ class TulipBot:
         }
 
         return prompt
+    
+    def _dist_polar(self, lat1, lon1, lat2, lon2):
+        return math.hypot(
+            lat1 * math.cos(lon1) - lat2 * math.cos(lon2),
+            lat1 * math.sin(lon1) - lat2 * math.sin(lon2)
+        )
+    
+    def _find_clinics(self, subway_input):
+        station = sorted(self.cached_subway_stations,
+                         key=lambda x: SequenceMatcher(None, x["name"],subway_input).ratio(),
+                         reverse=True)[0]
+        print(station)
+        nearest_three = sorted(self.cached_clinics,
+                               key=lambda x: self._dist_polar(
+                                   x["point"]["lat"], x["point"]["lon"],
+                                   station["lat"], station["lng"]))
+        nearest_three = nearest_three[:3]
+        return nearest_three
 
     async def generate_response(self, user_id: int, message: str) -> str:
         """Генерация ответа с использованием mock API"""
@@ -279,13 +306,9 @@ class TulipBot:
 
         elif callback_data == "checkup":
             await query.edit_message_text(
-                "Регулярные обследования очень важны. Обратись к терапевту, который направит тебя на необходимые анализы и консультацию специалистов."
+                "Регулярные обследования очень важны. Введи свою станцию метро, а мы найдём ближайшие онкологические диспансеры:"
             )
-            await query.message.reply_text(
-                "Что еще ты хотел(а) бы узнать?",
-                reply_markup=self._get_main_keyboard()
-            )
-            return MAIN
+            return STATION
 
         elif callback_data == "back_to_main":
             await query.edit_message_text(
@@ -294,6 +317,19 @@ class TulipBot:
             )
             return MAIN
 
+        return MAIN
+
+    async def handle_subway(self, update: Update, _context: ContextTypes.DEFAULT_TYPE) -> int:
+        """Обработчик станции метро"""
+        name = update.message.text
+        nearest = self._find_clinics(name)
+        for i in nearest:
+            await update.message.reply_text(f"{i["name"]}\n\nАдрес: {i["main_address"]}")
+
+        await update.message.reply_text(
+            "Что еще ты хотел(а) бы узнать?",
+            reply_markup=self._get_main_keyboard()
+        )
         return MAIN
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -383,7 +419,8 @@ class TulipBot:
                 ASSESSMENT: [
                     CallbackQueryHandler(self.button_handler),
                     MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
-                ]
+                ],
+                STATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_subway)]
             },
             fallbacks=[CommandHandler("start", self.start)],
             name="tulip_conversation",
