@@ -119,7 +119,6 @@ class TulipBot:
         station = sorted(self.cached_subway_stations,
                          key=lambda x: SequenceMatcher(None, x["name"],subway_input).ratio(),
                          reverse=True)[0]
-        print(station)
         nearest_three = sorted(self.cached_clinics,
                                key=lambda x: self._dist_polar(
                                    x["point"]["lat"], x["point"]["lon"],
