@@ -111,8 +111,8 @@ class TulipBot:
     
     def _dist_polar(self, lat1, lon1, lat2, lon2):
         return math.hypot(
-            lat1 * math.cos(lon1) - lat2 * math.cos(lon2),
-            lat1 * math.sin(lon1) - lat2 * math.sin(lon2)
+            lat1 * math.cos(lon1 / 180 * math.pi) - lat2 * math.cos(lon2 / 180 * math.pi),
+            lat1 * math.sin(lon1 / 180 * math.pi) - lat2 * math.sin(lon2 / 180 * math.pi)
         )
     
     def _find_clinics(self, subway_input):
