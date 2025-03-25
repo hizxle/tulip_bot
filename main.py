@@ -60,6 +60,14 @@ FEW_SHOT_EXAMPLES = [
     }
 ]
 
+DISPENSATION_TEXT = """Диспансеризация — это бесплатные осмотры, анализы и обследования, которые можно сделать по полису обязательного медицинского страхования (ОМС) после 18 лет. Программа будет зависеть от вашего возраста.
+
+Такие обследования, как маммография, ВПЧ-тест, колоноскопия и анализ кала на скрытую кровь помогают обнаружить болезнь на бессимптомной стадии. 
+
+Получить направление на диспансеризацию можно даже онлайн через портал gosuslugi.ru, выбрав соответствующую услугу. 
+Пройти диспансеризацию взрослому человеку можно в районной поликлинике, фельдшерском и мобильном пункте или в центре здоровья бесплатно раз три года в возрасте 18-39 лет и раз в год гражданам старше 40 лет.
+Проходите диспансеризацию, даже если нет жалоб и ничего не болит. Профилактические обследования для того и нужны, чтобы убедиться, что со здоровьем все в порядке, а, если нет, вовремя начать лечение болезни, это значительно повышает шансы на успех!"""
+
 
 class TulipBot:
     def __init__(self, telegram_token: str):
@@ -193,8 +201,8 @@ class TulipBot:
 
     def _get_main_keyboard(self) -> InlineKeyboardMarkup:
         keyboard = [
-            [InlineKeyboardButton("Персональная оценка риска", callback_data="start_assessment")],
-            [InlineKeyboardButton("Рекомендации по профилактике", callback_data="prevention")],
+            [InlineKeyboardButton("Оценка моего риска и рекомендации", callback_data="start_assessment")],
+            [InlineKeyboardButton("Диспансеризация", callback_data="dispensation")],
             [InlineKeyboardButton("Развеять мои страхи", callback_data="fears")],
             [InlineKeyboardButton("Где пройти обследование", callback_data="checkup")]
         ]
@@ -322,11 +330,19 @@ class TulipBot:
         #     )
         #     return MAIN
 
-        elif callback_data == "prevention":
-            await context.bot.send_chat_action(chat_id=user_id, action="typing")
-            prevention_request = "Расскажи о мерах профилактики онкологических заболеваний для большинства людей."
-            response = await self.generate_response(user_id, prevention_request)
-            await query.edit_message_text(response)
+        # elif callback_data == "prevention":
+        #     await context.bot.send_chat_action(chat_id=user_id, action="typing")
+        #     prevention_request = "Расскажи о мерах профилактики онкологических заболеваний для большинства людей."
+        #     response = await self.generate_response(user_id, prevention_request)
+        #     await query.edit_message_text(response)
+        #     await query.message.reply_text(
+        #         "Есть ли у тебя еще вопросы?",
+        #         reply_markup=self._get_main_keyboard()
+        #     )
+        #     return MAIN
+
+        elif callback_data == "dispensation":
+            await query.edit_message_text(DISPENSATION_TEXT)
             await query.message.reply_text(
                 "Есть ли у тебя еще вопросы?",
                 reply_markup=self._get_main_keyboard()
