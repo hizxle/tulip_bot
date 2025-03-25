@@ -8,9 +8,11 @@ from datetime import datetime
 from difflib import SequenceMatcher
 import math
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes, \
     ConversationHandler
+
+from questions import QUESTIONS, NUM_QUESTIONS, MAX_SCORE, RESULT_BAD, RESULT_OK, RESULT_GOOD, RECOMMENDATION
 
 # Настройка логирования
 logging.basicConfig(
@@ -20,13 +22,15 @@ logger = logging.getLogger(__name__)
 
 # Константы для конечного автомата
 MAIN, INITIAL_QUESTIONS, ASSESSMENT, STATION = range(4)
-GENDER, AGE, FAMILY_HISTORY, SMOKING, DIET, PHYSICAL_ACTIVITY = range(6)
+QUESTION_NUMBERS = range(NUM_QUESTIONS)
 
 # Системный промпт для модели
 SYSTEM_PROMPT = """Ты добрый, отзывчивый и дружелюбный помощник, который готов поддержать и помочь собеседнику. Бережно относишься к чувствительным темам, но много знаешь о здоровье людей и онкологических заболеваниях, готов делиться ими с собеседником в трудную минуту.
 Твои задачи:
 Предоставление персональных рекомендаций по профилактике рака, Индивидуальная оценка риска развития онкологических заболеваний, Адаптация к собеседнику, Рекомендация обратиться к онкологу или медицинскому генетику
 """
+
+test_scores = {}
 
 # Few-shot примеры для модели
 FEW_SHOT_EXAMPLES = [
@@ -195,6 +199,20 @@ class TulipBot:
             [InlineKeyboardButton("Где пройти обследование", callback_data="checkup")]
         ]
         return InlineKeyboardMarkup(keyboard)
+    
+    async def ask(self, message: Message, question: int):
+        cur_question = QUESTIONS[question]
+        await message.reply_text(cur_question["question"], reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton(x["text"], callback_data=f"ans_{question}_{i}")] for i, x in enumerate(cur_question["answers"])]
+        ))
+
+    async def results(self, user_id: int, message: Message):
+        if test_scores[user_id] < MAX_SCORE / 3:
+            await message.reply_text(RESULT_GOOD)
+        elif test_scores[user_id] < (MAX_SCORE / 3) * 2:
+            await message.reply_text(RESULT_OK)
+        else:
+            await message.reply_text(RESULT_BAD)
 
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Обработчик нажатий на кнопки"""
@@ -215,71 +233,94 @@ class TulipBot:
             return MAIN
 
         elif callback_data == "begin_questions":
-            await query.edit_message_text(
-                "Укажи, пожалуйста, твой пол:",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Женский", callback_data="gender_female")],
-                    [InlineKeyboardButton("Мужской", callback_data="gender_male")]
-                ])
-            )
+            test_scores[user_id] = 0
+            await self.ask(query.message, 0)
             return INITIAL_QUESTIONS
+        
+        elif callback_data.startswith("ans_"):
+            question, answer = "", ""
+            try:
+                _ans, question, answer = callback_data.split("_")
+            except TypeError:
+                return MAIN
+            try:
+                question = int(question)
+                answer = int(answer)
+            except ValueError:
+                return MAIN
+            try:
+                cur_question = QUESTIONS[question]
+                cur_answer = cur_question["answers"][answer]
+                test_scores[user_id] += cur_answer["score"]
+                await query.edit_message_text(cur_answer["reply"])
+                if question == NUM_QUESTIONS - 1:
+                    await self.results(user_id, query.message)
+                    await query.message.reply_text(
+                        "Есть ли у тебя еще вопросы?",
+                        reply_markup=self._get_main_keyboard()
+                    )
+                    return MAIN
+                await self.ask(query.message, question + 1)
+                return INITIAL_QUESTIONS
+            except IndexError:
+                return MAIN
 
-        elif callback_data.startswith("gender_"):
-            gender = callback_data.split("_")[1]
-            self.user_data[user_id]["user_info"]["gender"] = gender
+        # elif callback_data.startswith("gender_"):
+        #     gender = callback_data.split("_")[1]
+        #     self.user_data[user_id]["user_info"]["gender"] = gender
 
-            await query.edit_message_text(
-                "Спасибо! Теперь укажи, пожалуйста, твою возрастную группу:",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("До 30 лет", callback_data="age_under30")],
-                    [InlineKeyboardButton("30-45 лет", callback_data="age_30to45")],
-                    [InlineKeyboardButton("46-60 лет", callback_data="age_46to60")],
-                    [InlineKeyboardButton("Старше 60 лет", callback_data="age_over60")]
-                ])
-            )
-            return INITIAL_QUESTIONS
+        #     await query.edit_message_text(
+        #         "Спасибо! Теперь укажи, пожалуйста, твою возрастную группу:",
+        #         reply_markup=InlineKeyboardMarkup([
+        #             [InlineKeyboardButton("До 30 лет", callback_data="age_under30")],
+        #             [InlineKeyboardButton("30-45 лет", callback_data="age_30to45")],
+        #             [InlineKeyboardButton("46-60 лет", callback_data="age_46to60")],
+        #             [InlineKeyboardButton("Старше 60 лет", callback_data="age_over60")]
+        #         ])
+        #     )
+        #     return INITIAL_QUESTIONS
 
-        elif callback_data.startswith("age_"):
-            age_group = callback_data.split("_")[1]
-            self.user_data[user_id]["user_info"]["age_group"] = age_group
+        # elif callback_data.startswith("age_"):
+        #     age_group = callback_data.split("_")[1]
+        #     self.user_data[user_id]["user_info"]["age_group"] = age_group
 
-            await query.edit_message_text(
-                "Есть ли у тебя близкие родственники, у которых был диагностирован рак?",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Да", callback_data="family_yes")],
-                    [InlineKeyboardButton("Нет", callback_data="family_no")],
-                    [InlineKeyboardButton("Не знаю", callback_data="family_unknown")]
-                ])
-            )
-            return INITIAL_QUESTIONS
+        #     await query.edit_message_text(
+        #         "Есть ли у тебя близкие родственники, у которых был диагностирован рак?",
+        #         reply_markup=InlineKeyboardMarkup([
+        #             [InlineKeyboardButton("Да", callback_data="family_yes")],
+        #             [InlineKeyboardButton("Нет", callback_data="family_no")],
+        #             [InlineKeyboardButton("Не знаю", callback_data="family_unknown")]
+        #         ])
+        #     )
+        #     return INITIAL_QUESTIONS
 
-        elif callback_data.startswith("family_"):
-            family_history = callback_data.split("_")[1]
-            self.user_data[user_id]["user_info"]["family_history"] = family_history
+        # elif callback_data.startswith("family_"):
+        #     family_history = callback_data.split("_")[1]
+        #     self.user_data[user_id]["user_info"]["family_history"] = family_history
 
-            await query.edit_message_text(
-                "Спасибо за информацию! Подготовлю персональные рекомендации. Дай мне немного времени..."
-            )
+        #     await query.edit_message_text(
+        #         "Спасибо за информацию! Подготовлю персональные рекомендации. Дай мне немного времени..."
+        #     )
 
-            user_info = self.user_data[user_id]["user_info"]
-            assessment_request = (
-                f"На основе следующей информации о пользователе, предоставь персонализированную оценку "
-                f"рисков онкологических заболеваний и рекомендации по профилактике:\n"
-                f"Пол: {user_info.get('gender', 'не указан')}\n"
-                f"Возрастная группа: {user_info.get('age_group', 'не указана')}\n"
-                f"Наличие онкологических заболеваний в семье: {user_info.get('family_history', 'не указано')}\n"
-                f"Будь тактичным и вселяй уверенность."
-            )
+        #     user_info = self.user_data[user_id]["user_info"]
+        #     assessment_request = (
+        #         f"На основе следующей информации о пользователе, предоставь персонализированную оценку "
+        #         f"рисков онкологических заболеваний и рекомендации по профилактике:\n"
+        #         f"Пол: {user_info.get('gender', 'не указан')}\n"
+        #         f"Возрастная группа: {user_info.get('age_group', 'не указана')}\n"
+        #         f"Наличие онкологических заболеваний в семье: {user_info.get('family_history', 'не указано')}\n"
+        #         f"Будь тактичным и вселяй уверенность."
+        #     )
 
-            await context.bot.send_chat_action(chat_id=user_id, action="typing")
-            assessment = await self.generate_response(user_id, assessment_request)
+        #     await context.bot.send_chat_action(chat_id=user_id, action="typing")
+        #     assessment = await self.generate_response(user_id, assessment_request)
 
-            await query.message.reply_text(assessment)
-            await query.message.reply_text(
-                "Что ты хотел(а) бы узнать дальше?",
-                reply_markup=self._get_main_keyboard()
-            )
-            return MAIN
+        #     await query.message.reply_text(assessment)
+        #     await query.message.reply_text(
+        #         "Что ты хотел(а) бы узнать дальше?",
+        #         reply_markup=self._get_main_keyboard()
+        #     )
+        #     return MAIN
 
         elif callback_data == "prevention":
             await context.bot.send_chat_action(chat_id=user_id, action="typing")
