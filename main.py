@@ -13,6 +13,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
     ConversationHandler
 
 from questions import QUESTIONS, NUM_QUESTIONS, MAX_SCORE, RESULT_BAD, RESULT_OK, RESULT_GOOD, RECOMMENDATION
+from fears import FEARS_LIST
 
 # Настройка логирования
 logging.basicConfig(
@@ -207,6 +208,11 @@ class TulipBot:
             [InlineKeyboardButton("Где пройти обследование", callback_data="checkup")]
         ]
         return InlineKeyboardMarkup(keyboard)
+
+    def _get_fears_keyboard(self) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton(v[0], callback_data="fears_" + k)] for k, v in FEARS_LIST.items()
+        ])
     
     async def ask(self, message: Message, question: int):
         cur_question = QUESTIONS[question]
@@ -273,6 +279,17 @@ class TulipBot:
                 return INITIAL_QUESTIONS
             except IndexError:
                 return MAIN
+        
+        elif callback_data.startswith("fears_"):
+            key = callback_data.split("_")[1]
+            if key not in FEARS_LIST.keys():
+                return MAIN
+            await query.edit_message_text(FEARS_LIST[key][1], parse_mode="HTML")
+            await query.message.reply_text(
+                "Есть ли у тебя еще вопросы?",
+                reply_markup=self._get_main_keyboard()
+            )
+            return MAIN
 
         elif callback_data == "dispensation":
             await query.edit_message_text(DISPENSATION_TEXT)
@@ -283,13 +300,9 @@ class TulipBot:
             return MAIN
 
         elif callback_data == "fears":
-            await context.bot.send_chat_action(chat_id=user_id, action="typing")
-            fears_request = "Как справиться с канцерофобией и почему не все симптомы указывают на рак?"
-            response = await self.generate_response(user_id, fears_request)
-            await query.edit_message_text(response)
             await query.message.reply_text(
-                "Что еще тебя интересует?",
-                reply_markup=self._get_main_keyboard()
+                "Выбери раздел:",
+                reply_markup=self._get_fears_keyboard()
             )
             return MAIN
 
