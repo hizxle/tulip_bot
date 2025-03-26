@@ -221,6 +221,7 @@ class TulipBot:
             await message.reply_text(RESULT_OK)
         else:
             await message.reply_text(RESULT_BAD)
+        await message.reply_text(RECOMMENDATION)
 
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         """Обработчик нажатий на кнопки"""
