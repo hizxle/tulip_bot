@@ -62,7 +62,13 @@ class TulipBot:
         """Инициализация бота Тюльпан с использованием mock API"""
         self.telegram_token = telegram_token
         # URL mock API-сервера для тестирования (например, запущенного локально)
-        self.api_url = "http://localhost:5000/mock_api"
+        self.api_url = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion"
+        self.folder_id = os.getenv("FOLDER_ID")
+        self.iam_token = os.getenv("IAM_TOKEN")
+        if not self.folder_id or not self.iam_token:
+            logger.error("Не заданы переменные окружения FOLDER_ID или IAM_TOKEN")
+            exit(1)
+
         self.user_data = {}  # Хранение контекста беседы с пользователями
 
         r_subway = requests.get("https://api.hh.ru/metro/1")
@@ -93,16 +99,19 @@ class TulipBot:
             messages.extend(FEW_SHOT_EXAMPLES)
 
         # Добавление истории диалога (с ограничением контекста)
-        history = self.user_data[user_id]["history"][-10:]
+        history = self.user_data[user_id]["history"][-5:]
         for msg in history:
             messages.append({"role": msg["role"], "text": msg["text"]})
 
         prompt = {
-            "modelUri": "mock://test-model",
+            "modelUri": f"gpt://{self.folder_id}/yandexgpt",
             "completionOptions": {
                 "stream": False,
-                "temperature": 0.7,
-                "maxTokens": "1500"
+                "temperature": 0.6,
+                "maxTokens": "1000",
+                "reasoningOptions": {
+                    "mode": "DISABLED"
+                }
             },
             "messages": messages
         }
@@ -138,28 +147,38 @@ class TulipBot:
 
         return response
 
+
     def _model_inference(self, prompt: dict) -> str:
-        """Выполнение инференса модели через mock API"""
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.iam_token}"
+        }
 
         try:
             response = requests.post(self.api_url, headers=headers, json=prompt)
             response.raise_for_status()
-            result = response.json()
-            if "text" in result:
-                return result["text"]
-            else:
-                logger.error(f"Неожиданный формат ответа mock API: {result}")
-                return "Извините, произошла ошибка при обработке запроса."
+
+            result = response.json().get("result", {})
+            alternatives = result.get("alternatives", [])
+
+            if alternatives and "message" in alternatives[0]:
+                return alternatives[0]["message"].get("text", "Нет текста в ответе")
+
+            logger.warning("Неожиданный формат ответа YandexGPT")
+            return "Ошибка обработки ответа"
+
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP ошибка: {e.response.status_code} - {e.response.text}")
+            return "Ошибка взаимодействия с API"
         except requests.exceptions.RequestException as e:
-            logger.error(f"Ошибка при обращении к mock API: {e}")
-            return "Извините, в данный момент я не могу обработать ваш запрос. Пожалуйста, попробуйте позже."
+            logger.error(f"Сетевая ошибка: {str(e)}")
+            return "Нет соединения с сервером"
         except json.JSONDecodeError as e:
-            logger.error(f"Ошибка при разборе ответа mock API: {e}")
-            return "Извините, произошла ошибка при обработке ответа от сервера."
+            logger.error(f"Ошибка парсинга JSON: {str(e)}")
+            return "Некорректный ответ сервера"
         except Exception as e:
-            logger.error(f"Непредвиденная ошибка: {e}")
-            return "Извините, произошла непредвиденная ошибка."
+            logger.error(f"Критическая ошибка: {str(e)}")
+            return "Непредвиденная ошибка"
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         user = update.effective_user
@@ -458,7 +477,7 @@ class TulipBot:
 
 
 if __name__ == "__main__":
-    TELEGRAM_TOKEN = os.getenv("TG_TOKEN", "INSERT_YOUR_TELEGRAM_TOKEN")
+    TELEGRAM_TOKEN = os.getenv("TG_TOKEN")
 
     if not TELEGRAM_TOKEN:
         logger.error("Не указан обязательный параметр TELEGRAM_TOKEN.")
